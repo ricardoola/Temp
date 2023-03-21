@@ -78,7 +78,6 @@ static struct bar
 {
     // HOW TO MAKE A QUEUE THAT DEALS WITH N NUMBER OF STUDENTS?
     struct list_head queue; // list of students in queue
-    struct list_head waiting; // list of students waiting
     int queue_size;         // size of queue
     int num_groups;         // number of groups in queue
     int num_in_bar;         // number of people in bar
@@ -124,11 +123,31 @@ const char* getState(enum state s) {
     }
 }
 // proc show being filled out
+
+
+static int non_zero_groups(int n) {
+
+    int i = 0; 
+    int n = 0;
+    for (i = 0; i < 5; i++) //count how many types of groups at the bar have at least one person 
+    {
+            if (bar.customer_num[i] != 0) //0th: Freshman, 1st: Sophomore, 
+            {
+                n++;        //2nd: Junior, 3rd: Senior, 4th: Graduate
+                printk(KERN_EMERG "N_ZERO_GROUPS: %d", n);
+            }
+            else
+                continue;
+    }
+    return n;
+}
+
 static int proc_show(struct seq_file *m, void *v)
 {
-
+    
     //delete comments once format string is inserted into seq_printf
     struct timespec64 current_time, elapsed_time;
+    mutex_init(&procTimer);
 
     seq_printf(m, "Waiter State: %s\n", getState(bar.bar_state)); // print waiter state 
     seq_printf(m, "Current Table: %d\n", waiter.current_table); // print current table
@@ -165,19 +184,19 @@ static int proc_show(struct seq_file *m, void *v)
     seq_printf(m, "Current Occupancy:%d \n",bar.num_in_bar ); // print current occupancy
 
     seq_printf(m, "Bar Status: "); // print bar status );
+       
+    
+    mutex_lock(&procTimer);
+    int counter = 0, non_z_groups = 0;
+   
+    non_z_groups = non_zero_groups(non_z_groups);
 
-    int i, non_zero_groups, counter = 0;
-    for (i = 0; i < 5; i++) //count how many types of groups at the bar have at least one person 
-    {
-        if (bar.customer_num[i] != 0) //0th: Freshman, 1st: Sophomore, 
-            non_zero_groups++;        //2nd: Junior, 3rd: Senior, 4th: Graduate
-        else
-            continue;
-    }
-
-    seq_printf(m, "NON-ZERO GROUPS: %d", non_zero_groups); // print bar status );
+    mutex_unlock(&procTimer);
 
 
+    seq_printf(m, "NON-ZERO GROUPS: %d\n", non_z_groups); // print bar status );
+
+    mutex_lock(&procTimer);
     for (i = 0; i < 5; i++) //print number of each type of group at the bar
     {
 
@@ -186,7 +205,7 @@ static int proc_show(struct seq_file *m, void *v)
         else
         {
             counter++;
-            if (counter != non_zero_groups)
+            if (counter != non_z_groups)
             {
                 switch (i)
                 {
@@ -222,34 +241,55 @@ static int proc_show(struct seq_file *m, void *v)
             }
         }
     }
+    mutex_unlock(&procTimer);
 
     seq_printf(m, "Number of Customers Waiting:%d \n",bar.queue_size); //print number of customers waiting
     seq_printf(m, "Number of Groups Waiting: %d \n", bar.num_groups); //print number of groups waiting
     seq_printf(m, "Content of Queue: \n" ); //print content of queue
-   /* for (i = 0; i < bar.queue_size; i++) //replace 5 with queue.size
+    int i = 0;
+    int j = 0;
+    for (i = 0; i < bar.queue_size; i++) //replace 5 with queue.size
     {
-         for (int j = 0; j < queue[i].size; j++)// I'm unsure what varuble should be here.
-         {
-             seq_printf(m, "%d ", queue[i].type); // prints char type of each member in the group
-         }
-         seq_printf(m, "{group id: %d} ", groups[i]); // prints id
-    }*/
+
+        struct group *p;
+        struct list_head *temp;
+        int queue_id;
+        list_for_each(temp, &bar.queue)
+        {
+            p = list_entry(temp, struct group, in_line);
+            for (j = 0; j < p->size; j++)
+            {
+                seq_printf(m, "%d ", p->type);
+            }
+            queue_id = p->group_id;
+        }
+
+        seq_printf(m, "{group id: %d} \n", p->group_id); // prints id
+
+        //  for (int j = 0; j < queue[i].size; j++)// I'm unsure what varuble should be here.
+        //  {
+        //      seq_printf(m, "%d ", queue[i].type); // prints char type of each member in the group
+        //  }
+        //  seq_printf(m, "{group id: %d} ", groups[i]); // prints id
+    }
     seq_printf(m, "Number of customers serviced:%d \n\n", bar.customer_serviced); // prints number of customers serviced
 
-   /* for (i = 0; i < bar.queue_size; i++) //replace 5 with table.size
+    for (i = 0; i < 4; i++) //replace 5 with table.size
     {
         // // determine where the waiter is so that the correct [*] is printed
         if (waiter.current_table == i)///will this work
-             seq_printf(m, "[*]", ); // prints char type of each member in the group
+             seq_printf(m, "[*]"); // prints char type of each member in the group
          else
-             seq_printf(m, "[ ]", ); // prints char type of each member in the group
+             seq_printf(m, "[ ]"); // prints char type of each member in the group
          seq_printf(m, " Table %d: ", i);
-         for (int j = 0; j < table[i].seat[j]; j++)
+         for (j = 0; j < 8; j++)
          {
             // needs to deal with dirty and clean?
             seq_printf(m, "%d ", bar.tables[i].seats[j].type); // prints char type of each member in the group
          }
-    }*/
+            seq_printf(m, "\n"); // prints char type of each member in the group
+
+    }
 
     return 0;
 }
@@ -296,6 +336,8 @@ bool isDirty(void) // checks if table is dirty
         {
             // mutex_unlock(&waiter.Qmutex); // LOCK
             return true;
+            bar.customer_serviced++; // this increments the number of customers serviced
+          
         }
     }
     // mutex_unlock(&waiter.Qmutex); // LOCK
@@ -304,11 +346,11 @@ bool isDirty(void) // checks if table is dirty
 int waiter_cleans(void) // waiter cleans table
 {
     // mutex_lock(&waiter.Qmutex); // LOCK
-    //bar.bar_state = CLEANING; // bar state is set to cleaning
+    bar.bar_state = CLEANING; // bar state is set to cleaning
 
-    // mutex_unlock(&WaiterWorks_mutex); // UNLOCK
-    // ssleep(10); // takes 10 second to clean
-    // mutex_lock(&WaiterWorks_mutex); // LOCK
+    mutex_unlock(&WaiterWorks_mutex); // UNLOCK
+    ssleep(10); // takes 10 second to clean
+    mutex_lock(&WaiterWorks_mutex); // LOCK
     int i;
     for (i = 0; i < 8; i++)
     {
@@ -471,18 +513,18 @@ int waiter_works(void *data) // main thread function
     struct timer *entryTime; 
     struct list_head *dummy;
     struct list_head *temp;
-    //struct list_head waiting;
-    //INIT_LIST_HEAD(&waiting);
+    struct list_head waiting;
+    INIT_LIST_HEAD(&waiting);
 
     while (!kthread_should_stop())
     {
 
         //ADD CONDITION TO DO NOTHINBG IF THERE IS NO ONE AT THE BAR
-        // if (bar.num_groups == 0 && bar.num_in_bar == 0)
-        // {
-        //     //DO NOTHING
-        // }
-        if (bar.bar_state != OFFLINE && bar.num_groups > 0)
+        if (bar.num_groups == 0 && bar.num_in_bar == 0)
+        {
+            //DO NOTHING
+        }
+        else if (bar.bar_state != OFFLINE && bar.num_groups > 0)
         {
             // printk(KERN_EMERG "BEFORE LOCK");
             mutex_lock(&WaiterWorks_mutex); // LOCK
@@ -499,17 +541,16 @@ int waiter_works(void *data) // main thread function
                 // printk(KERN_EMERG "x in first loop: %d\n", x);
                 if (x == 0)
                 {
-                    list_move_tail(temp, &bar.waiting); // remove from queue, place in waiting area
+                    list_move_tail(temp, &waiting); // remove from queue, place in waiting area
                     // printk(KERN_EMERG "group moved to waiting area\n");
                     break; // break out of loop to avoid moving more than one group
                 }
                 break; // didnt find seat so break and try again later
             }
 
-            list_for_each_safe(temp, dummy, &bar.waiting) // setting bar values based on waiting area
+            list_for_each_safe(temp, dummy, &waiting) // setting bar values based on waiting area
             {
                 // printk(KERN_EMERG "second loop\n");
-                bar.bar_state = LOADING;
                 entry = list_entry(temp, struct group, in_line); // grab a group from the queue
                 // SEAT GROUP
                 int i;
@@ -524,17 +565,18 @@ int waiter_works(void *data) // main thread function
                     ssleep(1); // takes 1 second to seat group
                     mutex_lock(&WaiterWorks_mutex); // LOCK
                     // printk(KERN_EMERG "iteration %d\n", i);
-                    bar.customer_num[entry->type]++;
+                    bar.customer_num[entry->type] = bar.customer_num[entry->type] + 1;
                     printk(KERN_EMERG "group type entering customer num is : %d", entry->type);
                     bar.queue_size--;
                     bar.tables[where[0]].seats[where[1] + i].status = true;                           // seat is occupied
                     bar.tables[where[0]].seats[where[1] + i].type = entry->type;                      // set student in seat
                     bar.tables[where[0]].seats[where[1] + i].id = entry->group_id;                    // set id of seat
                     bar.tables[where[0]].group_ids[bar.tables[where[0]].gid_index] = entry->group_id; // set id of seat
+                    if (bar.tables[where[0]].gid_index != 8)
+                        bar.tables[where[0]].gid_index++; // increment index
+
                     // printk(KERN_EMERG "Individual %d seated at table %d seat %d\n", i, where[0], where[1] + i);
                 }
-                if (bar.tables[where[0]].gid_index < 7)
-                    bar.tables[where[0]].gid_index++; // increment index
                 //struct timer *entryTime; //entry time of group
                 // printk(KERN_EMERG "Allocating memory for timer entry\n");
                 entryTime = kmalloc(sizeof(struct timer) * 1, __GFP_RECLAIM);
@@ -558,7 +600,7 @@ int waiter_works(void *data) // main thread function
             }
             // printk(KERN_EMERG "finsihed seating groups\n");
             // delete all groups in waiting area (AKA all nodes)
-            list_for_each_safe(temp, dummy, &bar.waiting) // delete from waiting area
+            list_for_each_safe(temp, dummy, &waiting) // delete from waiting area
             {
                 // ssleep(1); // takes 1 second to remove group
                 // printk(KERN_EMERG "third loop\n");
@@ -601,7 +643,6 @@ int waiter_works(void *data) // main thread function
                             bar.tables[entryTime->tableNumb].seats[entryTime->seatNumb + j].dirty = true; //set seat to dirty
                             bar.tables[entryTime->tableNumb].seats[entryTime->seatNumb + j].id = -1; //set seat id to -1 for unoccupied
 
-                            bar.customer_serviced++; // this increments the number of customers serviced
                             entryTime->done = true; //set time to done
                             // printk(KERN_EMERG "Student %d removed from table %d seat %d\n", j, entryTime->tableNumb, entryTime->seatNumb + j);
                         }
@@ -621,27 +662,31 @@ int waiter_works(void *data) // main thread function
             mutex_unlock(&WaiterWorks_mutex); // UNLOCK
             ssleep(2); // takes 1 second to seat group
             mutex_lock(&WaiterWorks_mutex); // LOCK
-
-            bar.bar_state = MOVING;
             waiter.current_table = (waiter.current_table + 1) % 4; // move to next table
-            waiter.current_seat = 0;                               // set seat to 0
-            waiter.serving = bar.tables[waiter.current_table];     // set table to current table
-            printk(KERN_EMERG "Waiter moved to table %d\n", waiter.current_table);
-            
-            if (isEmpty() && isDirty())   // if table is empty && dirty
+
+            // FIX CONDITIONS
+            /*if (isEmpty())                                           // if table is empty
             {
-                printk(KERN_EMERG "CLEANING TABLE");
-                mutex_unlock(&WaiterWorks_mutex);                    // UNLOCK
-                bar.bar_state = CLEANING;                            // bar state is set to cleaning
-                ssleep(10);                                           // takes 10 seconds to clean table
-                mutex_lock(&WaiterWorks_mutex);                      // LOCK
-                waiter_cleans();                                     // clean table
-                printk(KERN_EMERG "TABLE CLEANED");
+                waiter->current_seat = 0;                            // set seat to 0
+                waiter->serving = bar.tables[waiter->current_table]; // set table to current table
             }
+            else if (isDirty()) // if table is dirty
+            {
+                waiter_cleans();                                     // clean table
+                waiter->current_seat = 0;                            // set seat to 0
+                waiter->serving = bar.tables[waiter->current_table]; // set table to current table
+            }
+            else // table is not empty and not dirty
+            {
+                waiter->current_seat = (waiter->current_seat + 1) % 8; // move to next seat
+                waiter->serving = bar.tables[waiter->current_table];   // set table to current table
+            }*/
             mutex_unlock(&WaiterWorks_mutex);
         }
 
     }
+    mutex_destroy(&WaiterWorks_mutex);
+
     return 0;
 }
 
@@ -763,7 +808,6 @@ static int bar_init(void)
     bar.num_ids = 0;         // set number of ids to 0
     // printk(KERN_INFO "Bar_init state: %d\n", bar.bar_state); //TEST PASSED!
     INIT_LIST_HEAD(&bar.queue); // initialize the queue
-    INIT_LIST_HEAD(&bar.waiting);
 
     int i, j;
     for (i = 0; i < 4; i++) // for every table
@@ -803,27 +847,8 @@ static void bar_exit(void)
     list_for_each_safe(temp, dummy, &bar.queue)
     { /* forwards */
         g = list_entry(temp, struct group, in_line);
-        printk(KERN_EMERG "grabbed queue entry in bar_exit to delete size is: %d\n", g->size);
         list_del(temp); /* removes entry from list */
         kfree(g);
-    }
-    list_for_each_safe(temp, dummy, &bar.waiting) // delete from waiting area
-    {
-        g = list_entry(temp, struct group, in_line); // grab a group from the queue
-        printk(KERN_EMERG "grabbed waiting entry in bar_exit to delete size is: %d\n", g->size);
-        list_del(temp); // remove from waiting area
-        kfree(g);     // free memory
-    }
-    //CHECKING IF QUEUE IS EMPTY
-    list_for_each_safe(temp, dummy, &bar.queue)
-    { /* forwards */
-        g = list_entry(temp, struct group, in_line);
-        printk(KERN_EMERG "Entries in queue after deletion: %d\n", g->size);
-    }
-    list_for_each_safe(temp, dummy, &bar.waiting)
-    { /* forwards */
-        g = list_entry(temp, struct group, in_line);
-        printk(KERN_EMERG "Entries in waiting after deletion: %d\n", g->size);
     }
     mutex_unlock(&waiter.Qmutex); // unlock mutex
     // kthread_stop(waiter.kthread); // stop waiter thread
